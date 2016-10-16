@@ -10,8 +10,6 @@
 #include <vector>
 #include <tuple>
 
-#include <boost/optional.hpp>
-
 namespace snakes_and_ladders {
     using cell_id_t = std::int16_t;
     using cell_offset_t = std::int16_t;
@@ -19,21 +17,20 @@ namespace snakes_and_ladders {
     using length_t = std::int8_t;
 
     enum class game_state_t : bool {
-        finished = true,// compare to 0 is fastest
-        running = false// compare to 1 is next
-                      // compare to -1 is next
+        finished = true,
+        running = false
     };
 
     inline bool operator! (game_state_t v) { return !static_cast<bool>(v); }
 
-    struct cell_t {// A snakes and ladders cell
-        const cell_offset_t next;
+    struct cell_t {
+        cell_offset_t const next;// A snakes and ladders cell
     };
+
 
     inline cell_offset_t next(cell_t const& c) {// get the increment for next
         return c.next;
     }
-
 
     struct board_builder_t {
         using jump_t = std::pair<cell_id_t, cell_id_t>;
@@ -62,11 +59,7 @@ namespace snakes_and_ladders {
         board_builder_t const& finalize() {//ready to rock
             using std::begin; using std::end;
 
-            if (std::includes(begin(jumps_), end(jumps_), begin(jumps_), end(jumps_), [](auto const& l, auto const& r) { return l.first == r.second || l.second == r.first; }))
-                throw std::logic_error("pre: chains of jumps found");
-
             std::sort(begin(jumps_), end(jumps_));//sort required to simplyfy arena construction.
-
             return *this;
         }
 
@@ -110,6 +103,10 @@ namespace snakes_and_ladders {
             return static_cast<cell_id_t>(arena.size() - 1);
         }
 
+        bool is_jump_cell(cell_id_t c) const {// get the increment for next
+            return static_cast<bool>(arena[c].next);
+        }
+
         cell_id_t advance(cell_id_t position, cell_offset_t count) const {//equivalent to modified std::advance(cell_iterator_t, count)
             if (position + count > end_position())
                 return position;//The no advance until exact end variation
@@ -118,60 +115,6 @@ namespace snakes_and_ladders {
         }
     private:
         const std::vector<cell_t> arena;
-    };
-
-    struct dice_t {
-        using single_roll_t = std::int8_t;
-        using roll_t = std::tuple<single_roll_t, single_roll_t, single_roll_t>;
-        dice_t(single_roll_t sides) :
-            engine(std::random_device()()),
-            distribution(1, sides)
-        {}// we have a n_sided dice. No body
-
-        roll_t roll() {// a normal n_sided dice roll folded by upto3
-            auto r0 = static_cast<single_roll_t>(distribution(engine));
-            if (r0 != distribution.max())
-                return std::make_tuple(r0, single_roll_t{}, single_roll_t{});
-
-            auto r1 = static_cast<single_roll_t>(distribution(engine));
-            if (r1 != distribution.max())
-                return std::make_tuple(r0, r1, single_roll_t{});
-
-            auto r2 = static_cast<single_roll_t>(distribution(engine));
-            if (r2 != distribution.max())
-                return std::make_tuple(r0, r1, r2);
-
-            return std::make_tuple(single_roll_t{}, single_roll_t{}, single_roll_t{});// 0 on n,n,n;
-        }
-    private:
-        std::mt19937 engine;
-        std::uniform_int_distribution<int> distribution;
-    };
-
-    struct buffered_dice_t {
-        buffered_dice_t(dice_t&& d, int buffer_length) :
-            d(std::move(d)),
-            buffer(buffer_length)
-        {//we have memory
-            fill_buffer();//init
-        }
-
-        dice_t::roll_t roll() {
-            if (current_index != buffer.size())
-                return buffer[current_index++];//read from cache
-            fill_buffer();//really crappy cache starts here. This stalls for a fashionably long time at sizeof(cache)
-            current_index = {};
-            return buffer[current_index++];
-        }
-    private:
-
-        void fill_buffer() {// do as you will. This writes itself.
-            std::generate_n(buffer.begin(), buffer.size(), [this]() { return d.roll(); });
-        }
-
-        std::vector<dice_t::roll_t> buffer;
-        int current_index = int{};
-        dice_t d;
     };
 
     struct game_t {
@@ -222,6 +165,9 @@ namespace snakes_and_ladders {
 
             auto exec_single_step = [this](cell_offset_t offset) {
                 players[current_player_] = board.advance(players[current_player_], offset);//Increment the iterator
+                while (board.is_jump_cell(players[current_player_])) {
+                    players[current_player_] = board.advance(players[current_player_], 0);
+                }
                 if (players[current_player_] == board.end_position()) {//End check taken only once
                     state_ = game_state_t::finished;//Write state
                     return state_;
