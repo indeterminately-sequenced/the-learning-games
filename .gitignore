@@ -252,10 +252,13 @@ paket-files/
 
 # JetBrains Rider
 .idea/
+
+#Visual Studio Local 
 *.sln.iml
-/snakes-and-ladders/Report20161016-2223.diagsession
-/snakes-and-ladders/Report20161016-0142.diagsession
-/snakes-and-ladders/Report20161015-2354.diagsession
-/snakes-and-ladders/Report20161015-2333 (2).diagsession
-/snakes-and-ladders/SnakesAndLadders/ClassDiagram.cd
-/include/json.h
+*.cd
+*.diagsession
+
+
+#Local ignores
+
+/cpp/include/json.h
