@@ -48,7 +48,9 @@ namespace the_learning_games {
     template<typename Integer, typename = std::void_t<std::enable_if_t< std::is_integral<Integer>::value, void>>>
     class dice_t {
     public:
-        using roll_t = Integer;//! Value type representing the rolls of a dice.
+        /*! Value type representing the roll of a dice.
+        */
+        using roll_t = Integer;
 
     private:
         std::mt19937 engine;
@@ -84,8 +86,13 @@ namespace the_learning_games {
     template<typename Dice>
     class upto3_dice_t {
     public:
-        using single_roll_t = typename Dice::roll_t;//! Value type representing the rolls of a dice.
-        using roll_t = std::tuple<single_roll_t, single_roll_t, single_roll_t>;//! @internal @ingroup Haskell_Comments A roll_t is equivalent to TakeWhile PaddUpto 3
+        /*! Value type representing a single roll of a Dice.
+        */
+        using single_roll_t = typename Dice::roll_t;
+
+        /*! Value type reprenting 3 rolls of the underlying Dice.
+        */
+        using roll_t = std::tuple<single_roll_t, single_roll_t, single_roll_t>;
 
     private:
         Dice dice;
@@ -129,6 +136,8 @@ namespace the_learning_games {
     template<typename Dice>
     class fixed_buffer_dice_t {
     public:
+        /*! Value type representing the roll of a dice.
+        */
         using roll_t = typename Dice::roll_t;
 
     private:
@@ -163,6 +172,9 @@ namespace the_learning_games {
             return read[read_index++];
         }
 
+
+        /*! @brief Returns the Number of sides of the dice
+        */
         auto sides() { return d.sides(); }
 
     private:

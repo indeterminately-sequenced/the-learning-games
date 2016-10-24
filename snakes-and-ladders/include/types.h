@@ -39,9 +39,16 @@ SOFTWARE.
 #include <vector>
 
 namespace snakes_and_ladders {
+    //! A jumping random access iterator on the board_t::arena.
     using cell_iterator_t = std::int16_t;
+
+    //! A offset to the cell position relative to another cell on the board_t::arena.
     using cell_offset_t = std::int16_t;
+
+    //! Represents a player in snl::game_t.
     using player_id_t = std::int16_t;
+
+    //! Represents the length of a side of the board_t::arena.
     using length_t = std::int8_t;
 
     /*! @brief Represents the state of the game.
@@ -52,13 +59,17 @@ namespace snakes_and_ladders {
         running = false
     };
 
-    inline bool operator! (game_state_t v) { return !static_cast<bool>(v); }//! @brief A hack to convert enum class to bool
+    //! @brief A hack to convert enum class to bool
+    inline bool operator! (game_state_t v) { return !static_cast<bool>(v); }
 
     /*! @brief A builder class to simplify board_t construction.
     */
     class board_builder_t {
     public:
+        //! A pair of cells specifying the jump.
         using jump_t = std::pair<cell_iterator_t, cell_iterator_t>;
+
+        //! A list of jumps.
         using jump_list_t = std::vector<jump_t>;
 
     private:
@@ -122,7 +133,8 @@ namespace snakes_and_ladders {
         /*! @internal @brief A snakes and ladders cell.
         */
         struct cell_t {
-            /*! @internal @brief next is the offset to the next cell relative to the current cell
+            
+            /*! @brief next is the offset to the next cell relative to the current cell
 
             1. 0 if empty cell.
             2. Positive if c is the start of a ladder. The value represents the length of the ladder.
@@ -206,8 +218,6 @@ namespace snakes_and_ladders {
         game_state_t state_;
 
     public:
-        using player_id_t = std::int8_t;
-
         /*! @brief Constructs a n_player game state on board.
             @param board A board_t instance on which the game will be simulated.
             @param n_players The number of players in the game.
