@@ -37,72 +37,116 @@ SOFTWARE.
 #include <cassert>
 
 namespace the_learning_games {
+    namespace detail {
+        template<typename T>
+        constexpr bool const type_larget_than_int_v = sizeof(T) >= sizeof(int);
+    }
 
-    /*! @brief A N-sided dice which can be rolled upto 3 times.
-        @details This class represents a normal N sided dice with the following
-        rolling rules:
-            1. If a N is rolled the dice is rolled again.
-            2. If N is rolled 3 times, all 3 rolls are nullified.
-            3. Return the sequence of upto 3 rolls.
-        @details This class can be used to represent upto a 127 sided dice.
+    /*! @brief This class represents a normal N sided dice. @see https://en.wikipedia.org/wiki/Dice
+        @todo replace typename Integral with concept
     */
+    template<typename Integer, typename = std::void_t<std::enable_if_t< std::is_integral<Integer>::value, void>>>
     class dice_t {
+    public:
+        using roll_t = Integer;//! Value type representing the rolls of a dice.
+
+    private:
         std::mt19937 engine;
-        std::uniform_int_distribution<int> distribution;
+        std::uniform_int_distribution<std::conditional_t<detail::type_larget_than_int_v<Integer>, Integer, int>> distribution;
 
     public:
-        using single_roll_t = std::int8_t;//! Value type representing the rolls of a dice. int8_t restricts us to a 127 sided dice.
-        using roll_t = std::tuple<single_roll_t, single_roll_t, single_roll_t>;//! A single_roll_t fold'ed upto3 times.
-        
         /*! @brief
-            @param sides The number of sides.
-            @pre `1 < sides < 128`.
+        @param sides The number of sides.
         */
-        dice_t(single_roll_t sides) :
+        dice_t(roll_t sides) :
             engine(std::random_device()()),
             distribution(1, sides)
-        {
-            assert(1 < sides && sides <= 127);
-        }
+        {}
 
-        /*! @internal
-            @brief This function rolls the dice upto 3 times
+        /*! @brief This function rolls the dice
         */
         roll_t roll() {
-            auto r0 = static_cast<single_roll_t>(distribution(engine));
-            if (r0 != distribution.max())
-                return std::make_tuple(r0, single_roll_t{}, single_roll_t{});
+            return static_cast<Integer>(distribution(engine));
+        }
 
-            auto r1 = static_cast<single_roll_t>(distribution(engine));
-            if (r1 != distribution.max())
-                return std::make_tuple(r0, r1, single_roll_t{});
+        /*! @brief Returns the Number of sides of the dice
+        */
+        roll_t sides() const { return static_cast<Integer>(distribution.max()); }
+    };
 
-            auto r2 = static_cast<single_roll_t>(distribution(engine));
-            if (r2 != distribution.max())
+    /*! @brief A dice which can be rolled upto 3 times.
+        @details This class represents a normal N sided dice with the following
+        rolling rules:
+            1. If a N is rolled repeat step 1 upto 3 times.
+            2. If N is rolled 3 times, all 3 rolls are nullified.
+            3. Return the sequence of 3 rolls.
+    */
+    template<typename Dice>
+    class upto3_dice_t {
+    public:
+        using single_roll_t = typename Dice::roll_t;//! Value type representing the rolls of a dice.
+        using roll_t = std::tuple<single_roll_t, single_roll_t, single_roll_t>;//! @internal @ingroup Haskell_Comments A roll_t is equivalent to TakeWhile PaddUpto 3
+
+    private:
+        Dice dice;
+        static constexpr auto const nil = typename Dice::roll_t{};
+
+    public:
+        /*! @brief
+            @param sides The number of sides.
+        */
+        upto3_dice_t(single_roll_t sides) :
+            dice(sides)
+        {}
+
+        /*! @brief This function rolls the dice upto 3 times
+        */
+        roll_t roll() {
+            auto r0 = dice.roll();
+            if (r0 != dice.sides())
+                return std::make_tuple(r0, nil, nil);
+
+            auto r1 = dice.roll();
+            if (r1 != dice.sides())
+                return std::make_tuple(r0, r1, nil);
+
+            auto r2 = dice.roll();
+            if (r2 != dice.sides())
                 return std::make_tuple(r0, r1, r2);
 
-            return std::make_tuple(single_roll_t{}, single_roll_t{}, single_roll_t{});//! @internal return `0` on rolling `{ sides, sides, sides }`.
+            return std::make_tuple(nil, nil, nil);//! returns `0` on rolling `{ sides, sides, sides }`.
         }
+
+        /*! @brief Returns the Number of sides of the dice
+        */
+        auto sides() { return d.sides(); }
     };
 
     /*!
         @brief A simple buffered dice which wraps a normal dice with a asynchronously filled buffer.
+            The roll_t type of the given dice must fit within a boost::lockfree::queue cell
     */
-    class buffered_dice_t {
-        std::vector<dice_t::roll_t> read, write;
-        std::atomic<int> current_index;
-        std::mutex swap_mutex;
+    template<typename Dice>
+    class fixed_buffer_dice_t {
+    public:
+        using roll_t = typename Dice::roll_t;
+
+    private:
+        static constexpr auto buffer_length = 128 * 1024 * 1024;
+
+        std::unique_ptr<roll_t[]> read, write;
+        std::atomic_ptrdiff_t read_index = buffer_length / 2;
+        Dice d;
         std::future<void> writer;
-        dice_t d;
+        std::mutex swap_mutex;
 
     public:
         /*! Allocates a read & a write buffer and then asynchronously requests a fill_buffer().
         */
-        buffered_dice_t(dice_t&& d, int buffer_length) :
-            d(std::move(d)),
-            read(buffer_length >> 1),
-            write(buffer_length >> 1),
-            current_index(buffer_length >> 1)
+        fixed_buffer_dice_t(roll_t sides) :
+            read(new roll_t[64 * 1024 * 1024]),
+            write(new roll_t[64 * 1024 * 1024]),
+            d(sides)
         {
             fill_buffer();
         }
@@ -110,30 +154,46 @@ namespace the_learning_games {
         /*! @brief Performs a read operation on the the read buffer.
             Performs a swap operation when the read buffer is fully utilized.
             In most cases the previous async write operation will have completed and the writer.get() is unlikely to block.
-            If you encounter frequent blocks increase the buffer length
+            If you encounter frequent blocks increase the buffer length.
+            This operation must be synchronized externally if performed upon a single object from multiple threads.
         */
-        dice_t::roll_t roll() {
-            using std::swap;
-
-            if (current_index != read.size())
-                return read[current_index++];//read from cache
-
-            writer.get();// retrieve the other buffer
-            {
-                std::lock_guard<std::mutex> lock(swap_mutex);
-                swap(read, write);// swap in place
-                current_index = {};// reset the read index
-            }
-            fill_buffer();// launch writer async
-            return read[current_index++];
+        roll_t roll() {
+            if (read_index == buffer_length / 2)
+                swap_buffers();
+            return read[read_index++];
         }
+
+        auto sides() { return d.sides(); }
 
     private:
         /*! @internal
-            @details We launch a asynchronous tasklet to fill the write vector.
+            @details We launch a asynchronous task to fill the write buffer.
         */
         void fill_buffer() {
-            writer = std::async(std::launch::async, [this]() {std::generate_n(write.begin(), write.size(), [this]() { return d.roll(); }); } );
+            using std::begin; using std::end;
+
+            writer = std::async(std::launch::async, [this]() {
+                std::generate_n(write.get(), buffer_length / 2, [this]() { return d.roll(); });
+            });
         }
+
+        /*! @internal @brief Swap the two buffers.
+        */
+        void swap_buffers() {
+            std::lock_guard<std::mutex> guard(swap_mutex);
+            if (read_index != buffer_length / 2) return;
+
+            writer.get();// wait on future value if required
+            swap(read, write);// swap in place
+            read_index = {};// reset the read index
+            fill_buffer();// launch writer async
+        }
+
     };
+
+
+    namespace testing {
+
+    }
+
 }

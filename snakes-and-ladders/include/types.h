@@ -44,37 +44,40 @@ namespace snakes_and_ladders {
     using player_id_t = std::int16_t;
     using length_t = std::int8_t;
 
-    //! represents the Haskell type EitherOr running finished
+    /*! @brief Represents the state of the game.
+        @internal @ingroup Haskell_Comments equivalent to a Haskell Either running finished
+    */
     enum class game_state_t : bool {
         finished = true,
         running = false
     };
 
-    inline bool operator! (game_state_t v) { return !static_cast<bool>(v); }
+    inline bool operator! (game_state_t v) { return !static_cast<bool>(v); }//! @brief A hack to convert enum class to bool
 
-    struct cell_t {//! A snakes and ladders cell
-        cell_offset_t const next;
-    };
-
-
-    /*! @param c The cell.
-        @brief Get the offset to the next cell relative to the current cell
-        
-
-            1. 0 if empty cell.
-            2. Positive if c is the start of a ladder. The value represents the length of the ladder.
-            3. Negative if c is the mouth of a snake. The value represents the length of the snake.
+    /*! @brief A builder class to simplify board_t construction.
     */
-    inline cell_offset_t next(cell_t const& c) {
-        return c.next;
-    }
-
-    struct board_builder_t {
+    class board_builder_t {
+    public:
         using jump_t = std::pair<cell_iterator_t, cell_iterator_t>;
         using jump_list_t = std::vector<jump_t>;
 
+    private:
+        length_t const side_;
+        jump_list_t jumps_;
+
+    public:
+
+        /*! @brief Construct a board_builder_t
+            @param side The length of the board_t to construct.
+        */
         board_builder_t(length_t side) : side_(side) {}
 
+        /*! @brief Add a jump to the list of jumps.
+            @param from The source cell of the jump.
+            @param to The target cell of the jump.
+            @throws std::logic_error The exception string contains the Snakes & Ladders rule which was violated.
+            @return Returns a const reference to *this.
+        */
         board_builder_t& add_jump(cell_iterator_t from, cell_iterator_t to) {
             if (from < cell_iterator_t{} || to < cell_iterator_t{}) throw std::logic_error("pre: source or destination less than start");
             if (from >= cell_iterator_t{ side_ } *side_ || to >= cell_iterator_t{ side_ } *side_) throw std::logic_error("pre: source or destination greater than end");
@@ -87,74 +90,115 @@ namespace snakes_and_ladders {
             return *this;
         }
 
+        /*! @brief @return Returns the list of jumps.
+        */
         jump_list_t const& jumps() const {
             return jumps_;
         }
 
+        /*! @brief @return Returns the side length of the game board.
+        */
         length_t side() const {
             return side_;
         }
 
+        /*! @brief Sorts the jump list in preparation for constructing a board_t.
+            @return Returns a const reference to *this.
+        */
         board_builder_t const& finalize() {
             using std::begin; using std::end;
 
             std::sort(begin(jumps_), end(jumps_));//sort required to simplify arena construction.
             return *this;
         }
-
-    private:
-        length_t const side_;
-        jump_list_t jumps_;
     };
 
-    struct board_t {
-        explicit board_t(board_builder_t const& builder) :
-            arena([&]() {//! @internal Pseudo constructor to construct a const complex member object
+    /*! @brief The snakes and ladders game board.
+    This board essentially consists of a const array of cells. Players begin at cell 0 which represents the starting state before any dice rolls.
+    The game proceeds from 1 to N*N where N is the side length of the game board @see https://en.wikipedia.org/wiki/Snakes_and_Ladders .
+    */
+    class board_t {
+
+        /*! @internal @brief A snakes and ladders cell.
+        */
+        struct cell_t {
+            /*! @internal @brief next is the offset to the next cell relative to the current cell
+
+            1. 0 if empty cell.
+            2. Positive if c is the start of a ladder. The value represents the length of the ladder.
+            3. Negative if c is the mouth of a snake. The value represents the length of the snake.
+            */
+            cell_offset_t const next;
+        };
+
+        const std::vector<cell_t> arena;//! @internal The actual game board
+
+        /*! @internal @brief Pseudo constructor to construct the arena.
+            @param builder Provides side length & a list of jumps in sorted order
+            Constructs a sparse DFA based upon the supplied jumps
+        */
+        static std::vector<cell_t> make_arena(board_builder_t const& builder) {
             using std::begin; using std::end;
 
             auto last_cell = cell_iterator_t{ builder.side() } *builder.side();
             auto current_cell = cell_iterator_t{};
 
             std::vector<cell_t> rc;
-            rc.reserve(last_cell - current_cell + 1);//!< @internal Allocate the actual object
+            rc.resize(last_cell - current_cell + 1, cell_t{ 0 });//! @internal Allocate the actual object setting all cell.next to 0
 
             for (auto const jump : builder.jumps()) {
-                // Fill cells upto jump start
-                std::generate_n(std::back_inserter(rc), std::min(last_cell - current_cell, jump.first - current_cell), []() -> cell_t { return{ 0 }; });
-                //set jump source
-                rc.emplace_back(cell_t{ jump.second - jump.first });
-                current_cell = jump.first;
-            }
-            while (current_cell != last_cell) {//fill remaining cells
-                rc.emplace_back(cell_t{ cell_offset_t{} });
-                current_cell++;
+                cell_t jump_source{ jump.second - jump.first };
+                //set jump source cell.next to the length of the jump
+                (*(rc.data() + jump.first)).~cell_t();// is this neccessary?
+                new(rc.data() + jump.first) cell_t{ jump.second - jump.first };
             }
             return rc;
-        }())//! @internal Execute the pseudo constructor. The move is probably elided.
+        }
+
+    public:
+        /*! @brief Constructs a board_t based upon the parameter pack supplied by builder
+            @param builder The parameter pack containing the arena dimensions & the jumps in sorted order
+        */
+        explicit board_t(board_builder_t const& builder) :
+            arena(make_arena(builder))
         {}
 
-        cell_iterator_t start_position() const {//!< @brief begin iterator
+        cell_iterator_t begin() const {//! @brief Returns iterator to the start position of the arena
             return{};
         }
 
-        cell_iterator_t end_position() const {//! @brief end iterator - 1
-            return static_cast<cell_iterator_t>(arena.size() - 1);
+        cell_iterator_t end() const {//! @brief Returns iterator pointing one past the end position of the arena.
+            return static_cast<cell_iterator_t>(arena.size());
         }
 
-        bool is_jump_cell(cell_iterator_t c) const {//! @brief `!( is_snake || is_ladder)`
-            return static_cast<bool>(arena[c].next);
+        bool is_jump_cell(cell_iterator_t c) const {//! @brief `!( is_snake(c) || is_ladder(c))`
+            return arena[c].next != 0;
         }
 
-        cell_iterator_t advance(cell_iterator_t position, cell_offset_t count) const {//! @brief equivalent to modified std::advance(cell_iterator_t, count)
-            if (position + count > end_position())
-                return position;//The no advance until exact end variation
-                //return end_position() - (position + count - end_position());// The reflect at end variation. ignores jumps?
-            return position + count + next(arena[position + count]);
+        /*! @brief std::advance(cell_iterator_t, count) equivalent on snl::board_t::arena
+        */
+        cell_iterator_t advance(cell_iterator_t position, cell_offset_t count) const {
+            if (position + count >= end())
+                return position;//! @internal @ingroup Snakes_And_Ladders Once a player is less than dice.sides() steps from the end they may move only in a sequence of exact dice rolls.
+                //return take_all_jumps(end_position() - (position + count - end_position()));//! @internal @ingroup Snakes_And_Ladders The reflect at end variation.
+            return take_all_jumps(position + count);
         }
+
     private:
-        const std::vector<cell_t> arena;
+        /*! @internal @brief Takes all jumps present in a chain starting at position
+        */
+        cell_iterator_t take_all_jumps(cell_iterator_t position) const {
+            while (is_jump_cell(position)) {
+                position = position + arena[position].next;
+            }
+            return position;
+        }
     };
 
+    /*! @brief The game_t class represents the state of a game in progress.
+        It provides a single non const member function move() which advances the state of the game. The game_t class is explicitly
+        convertible to bool to simplify checking the termination condition.
+    */
     class game_t {
         board_t const &board;
         player_id_t current_player_;
@@ -164,30 +208,44 @@ namespace snakes_and_ladders {
     public:
         using player_id_t = std::int8_t;
 
-        game_t(board_t const &board, int n_players) :
+        /*! @brief Constructs a n_player game state on board.
+            @param board A board_t instance on which the game will be simulated.
+            @param n_players The number of players in the game.
+        */
+        game_t(board_t const &board, player_id_t n_players) :
             board(board),
-            players(n_players, board.start_position()),
+            players(n_players, board.begin()),
             current_player_{},
             state_(game_state_t::running)
         {}
 
+#ifdef SNL_TEST
         void reset() {
             state_ = game_state_t::running;//Set state to running
-            std::fill(begin(players), end(players), cell_offset_t{ board.start_position() });//Set all players at beginning of board
+            std::fill(begin(players), end(players), cell_offset_t{ board.begin() });//Set all players at beginning of board
         }
+#endif
 
+        /*! @brief Returns true if the game is running.
+        */
         explicit operator bool() const {
             return state_ == game_state_t::running;
         }
 
+        /*! @brief Returns the player whose move is next. If the game is finished then returns the winner of the game.
+        */
         player_id_t current_player() const {
             return current_player_;
         }
 
+        /*! @brief Returns a const referance to the internal std::vector of player positions.
+        */
         auto const& all_player_positions() const {
             return players;
         }
 
+        /*! @brief Returns the position of the player on the game board
+        */
         auto player_position(player_id_t id) const {
             return players[id];
         }
@@ -204,6 +262,7 @@ namespace snakes_and_ladders {
 
             return new_players;
         }
+
         /*! 1. Moves the current_player() by upto 3 steps sequencially.
             2. Sets the game state to end and returns if a player reaches the end.
             3. Increments the current_player_ index.
@@ -211,33 +270,34 @@ namespace snakes_and_ladders {
         void move(cell_offset_t first, cell_offset_t second, cell_offset_t third) {
             using std::begin; using std::end;
 
-            cell_offset_t moves[] = { first, second, third };
+            cell_offset_t moves[] = { first, second, third };//! @todo send sum of all 3 to the validate_move function
 
             auto exec_single_step = [this](cell_offset_t offset) {
-                players[current_player_] = board.advance(players[current_player_], offset);//advance(iterator, offset) equivalent on snl::board_t::arena
-                while (board.is_jump_cell(players[current_player_])) {
-                    players[current_player_] = board.advance(players[current_player_], 0);//take all jumps at target cells
-                }
-                if (players[current_player_] == board.end_position()) {//taken only at end
+                players[current_player_] = board.advance(players[current_player_], offset);
+
+                if (players[current_player_] == board.end() - 1) {//taken only at end
                     state_ = game_state_t::finished;
                     return state_;
                 }
                 return game_state_t::running;
             };
 
-            if (std::all_of(begin(moves), end(moves), exec_single_step))// Maybe (execute 3) steps. Signal the game end state.
-                current_player_ = complete_turn();//If game didn't end advance the current_player.
+            if (std::none_of(begin(moves),
+                end(moves),
+                [&exec_single_step](cell_offset_t offset) { return !(!(exec_single_step(offset))); }))//! @internal @ingroup Haskell_Comments Equivalent to a Haskell TakeWhile. Signal the game end state.
+                complete_turn();//If game didn't end advance the current_player.
             return;
         }
 
     private:
-        /*! @internal players is a Ring of size players.size(). current_player_ is a index on that ring.
-            complete_turn() effectively implements +1 on that index.
+        /*! @internal @ingroup Algebraic_Structures players is a Ring of size players.size(). current_player_ is a index on that ring.
+            complete_turn() effectively implements the successor function on a Ring.
         */
-        player_id_t complete_turn() const {
-            if (current_player_ + 1 == players.size())
-                return player_id_t{};
-            return current_player_ + 1;
+        void complete_turn() {
+            ++current_player_;
+            if (current_player_ == players.size()) {
+                current_player_ = player_id_t{};
+            }
         }
     };
 }

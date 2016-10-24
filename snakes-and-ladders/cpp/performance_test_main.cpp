@@ -30,8 +30,10 @@ SOFTWARE.
 #include <chrono>
 #include <iostream>
 
-#include "include\types.h"
+#define SNL_TEST 1
+
 #include "include\dice.h"
+#include "include\types.h"
 
 namespace snl = snakes_and_ladders;
 namespace tlg = the_learning_games;
@@ -54,15 +56,16 @@ int main() {
         .add_jump(3, 14)
         .add_jump(1, 38)
         .finalize();
-    snl::board_t b(builder);
-    tlg::dice_t d_inner(6);
+    snl::board_t board(builder);
 
-    auto const game_count = 1 << 20;
-    auto const mean_rolls_per_game = 1 << 9;//150; //measured no is ~100 doubling for safety margin
-    auto const buffer_length = game_count * mean_rolls_per_game;
+    auto const game_count = 1 << 22;
+    tlg::upto3_dice_t<
+        tlg::fixed_buffer_dice_t<
+        tlg::dice_t<std::int8_t> > > dice(6);
+    auto const buffer_length = 64 * 1024 * 1024;// 64 MB
 
     auto start_time = std::chrono::high_resolution_clock().now();
-    tlg::buffered_dice_t dice(std::move(d_inner), buffer_length);
+    dice.roll();
     auto end_time = std::chrono::high_resolution_clock().now();
 
     auto time_taken = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
@@ -71,10 +74,11 @@ int main() {
     std::cout << "Time taken = " << time_taken << " ms\n";
     std::cout << "Dice rolls = " << buffer_length << "\n";
     std::cout << "DRPS       = " << drps << "\n";
-    dice.roll();
 
     auto counter = game_count;
-    snl::game_t game(b, 3);
+    snl::game_t game(board, 3);
+
+    //player_strategy_t strategy;
 
     start_time = std::chrono::high_resolution_clock().now();
     while (counter--) {
